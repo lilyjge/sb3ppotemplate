@@ -44,15 +44,56 @@ sb3ppotemplate/
 ├── environment.py           # Custom self-driving car environment (to be implemented)
 ├── train.py                 # Training script (to be implemented)
 ├── evaluate.py              # Evaluation script (to be implemented)
+├── test_environment.py      # Test script to verify environment works
+├── setup/                   # Pre-built components
+│   ├── track (3).py        # Track generation class
+│   ├── controls (1).py     # Car physics controller
+│   ├── track_config (1).yaml # Configuration file
+│   └── car (1).urdf        # Car model file
 └── models/                  # Directory for saved models
 ```
 
+## Learning Approach
+
+The code uses a **Socratic method** approach - instead of giving you the answers, it asks questions to guide your thinking:
+- **Why** questions help you understand the reasoning behind design choices
+- **What** questions help you identify what needs to be implemented
+- **How** questions guide you through the implementation process
+
+Each file contains:
+- `TODO` comments marking places where you need to fill in code
+- Socratic questions prompting you to think about design decisions
+- Hints and explanations of key concepts
+- Placeholder code showing the expected structure
+
 ## Next Steps
 
-1. Implement the custom self-driving car environment in `environment.py`
-2. Set up the PPO training script in `train.py`
-3. Create an evaluation script in `evaluate.py`
-4. Experiment with hyperparameters and training configurations
+1. **Implement the environment** (`environment.py`):
+   - Define observation and action spaces
+   - Implement reward function
+   - Set up termination/truncation conditions
+   - Integrate with PyBullet and the setup components
+
+2. **Test your environment** (`test_environment.py`):
+   - Run `python test_environment.py` to verify your implementation
+   - Fix any issues before proceeding to training
+   - This helps catch bugs early!
+
+3. **Set up training** (`train.py`):
+   - Configure PPO hyperparameters
+   - Set up callbacks for evaluation and checkpointing
+   - Start training and monitor progress
+
+4. **Create evaluation** (`evaluate.py`):
+   - Load trained models
+   - Run evaluation episodes
+   - Visualize and analyze results
+
+5. **Experiment**:
+   - Try different hyperparameters
+   - Modify reward functions
+   - Adjust observation spaces
+   - Compare different training configurations
 
 ## Resources
 
