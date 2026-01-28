@@ -92,8 +92,11 @@ class SelfDrivingCarEnv(gym.Env):
         
         # TODO: Set initial car position and orientation from config
         # What's the difference between position and orientation?
-        # Spawn on track centerline (first point)
-        spawn_pos = self.track.centerline[0].copy()
+        # Use track centerline for X/Y and configured Z height so the car
+        # starts exactly on the track but at a sane height above it.
+        spawn_xy = self.track.centerline[0][:2].copy()
+        spawn_z = float(self.config["spawn"]["position"][2])
+        spawn_pos = np.array([spawn_xy[0], spawn_xy[1], spawn_z], dtype=float)
         spawn_orn = self.config["spawn"]["orientation"]
         p.resetBasePositionAndOrientation(self.car_id, spawn_pos, spawn_orn, physicsClientId=self.physics_client)
         # Reset velocity to zero
@@ -102,8 +105,8 @@ class SelfDrivingCarEnv(gym.Env):
         # Initialize controller
         # TODO: Create the TankDriveController. What does it need?
         self.controller = TankDriveController(self.config_path, self.car_id, self.physics_client)
-        # Update fixed height to match centerline height
-        self.controller.fixed_height = self.track.centerline[0][2]
+        # Update fixed height to match configured spawn height (avoids intersecting the track)
+        self.controller.fixed_height = float(spawn_pos[2])
         
         # Define action space
         # TODO: What actions should the agent control?
@@ -122,9 +125,11 @@ class SelfDrivingCarEnv(gym.Env):
         
         # TODO: Initialize any tracking variables you need
         # What information do you need to compute rewards and check termination?
-        self.last_position = self.track.centerline[0].copy()
+        self.last_position = spawn_pos.copy()
         self.progress = 0.0
         self.episode_reward = 0.0
+        # Track lap completion for bonus rewards / termination
+        self.lap_completed = False
         # Track recent positions for stuck detection
         self.position_history = [self.last_position.copy()]
         self.stuck_threshold = 0.01  # Minimum movement per step to not be considered stuck
@@ -306,6 +311,15 @@ class SelfDrivingCarEnv(gym.Env):
         # What happens if rewards are too large or too small?
         # Reward forward progress heavily, add speed bonus, penalize off-track
         reward = 50.0 * progress_reward + 5.0 * speed_reward + 2.0 * centerline_alignment_bonus + off_track_penalty
+
+        # Small penalty for sitting still on-track to discourage stopping
+        if is_on_track and np.linalg.norm(car_vel[:2]) < 0.05:
+            reward -= 0.1
+
+        # Big bonus for completing (almost) a full lap, but only once
+        if (not self.lap_completed) and (self.total_lap_progress >= 0.95):
+            reward += 100.0
+            self.lap_completed = True
         
         return reward
     
@@ -402,9 +416,11 @@ class SelfDrivingCarEnv(gym.Env):
             self.controller.fixed_height = self.track.centerline[0][2]
         
         # TODO: Reset car to initial position
-        # Where should the car start? (from config)
-        # Spawn on track centerline (first point)
-        spawn_pos = self.track.centerline[0].copy()
+        # Where should the car start? (from config and track)?
+        # After possible track regeneration, use new centerline X/Y and same Z height.
+        spawn_xy = self.track.centerline[0][:2].copy()
+        spawn_z = float(self.config["spawn"]["position"][2])
+        spawn_pos = np.array([spawn_xy[0], spawn_xy[1], spawn_z], dtype=float)
         spawn_orn = self.config["spawn"]["orientation"]
         p.resetBasePositionAndOrientation(self.car_id, spawn_pos, spawn_orn, physicsClientId=self.physics_client)
         p.resetBaseVelocity(self.car_id, [0, 0, 0], [0, 0, 0], physicsClientId=self.physics_client)
@@ -418,6 +434,7 @@ class SelfDrivingCarEnv(gym.Env):
         # Reset centerline progress tracking
         self.last_centerline_index = 0
         self.total_lap_progress = 0.0
+        self.lap_completed = False
         observation = self._get_observation()
         info = {"track_seed": seed, "starting_position": self.config["spawn"]["position"]}
         return observation, info
@@ -465,16 +482,21 @@ class SelfDrivingCarEnv(gym.Env):
         
         # Get car orientation to compute forward direction
         car_pos, car_orn = p.getBasePositionAndOrientation(self.car_id, physicsClientId=self.physics_client)
-        
-        # Lock Z position to fixed height
+
+        # Lock Z position to fixed height, and keep car upright (2D motion only)
+        # This avoids flipping / tipping behavior that makes control harder.
         if abs(car_pos[2] - self.controller.fixed_height) > 0.001:
-            p.resetBasePositionAndOrientation(
-                self.car_id,
-                [car_pos[0], car_pos[1], self.controller.fixed_height],
-                car_orn,
-                physicsClientId=self.physics_client
-            )
-            car_pos, car_orn = p.getBasePositionAndOrientation(self.car_id, physicsClientId=self.physics_client)
+            car_pos = [car_pos[0], car_pos[1], self.controller.fixed_height]
+        # Extract yaw, zero roll/pitch to keep car upright
+        roll, pitch, yaw = p.getEulerFromQuaternion(car_orn)
+        upright_orn = p.getQuaternionFromEuler([0.0, 0.0, yaw])
+        p.resetBasePositionAndOrientation(
+            self.car_id,
+            car_pos,
+            upright_orn,
+            physicsClientId=self.physics_client
+        )
+        car_pos, car_orn = p.getBasePositionAndOrientation(self.car_id, physicsClientId=self.physics_client)
         
         # Compute forward direction in world frame
         rot_matrix = np.array(p.getMatrixFromQuaternion(car_orn)).reshape((3, 3))

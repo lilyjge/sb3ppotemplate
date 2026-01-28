@@ -19,6 +19,7 @@ dist/
 # Models and checkpoints
 models/*.zip
 models/*.pkl
+models/*
 *.pth
 *.pt
 

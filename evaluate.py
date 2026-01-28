@@ -256,7 +256,7 @@ def main():
     # TODO: Parse command line arguments
     # How should users specify model path, number of episodes, etc.?
     parser = argparse.ArgumentParser(description="Evaluate trained PPO model")
-    parser.add_argument("--model", type=str, default="models/final_model.zip", help="Path to model file")
+    parser.add_argument("--model", type=str, default="models/ppo1/final_model.zip", help="Path to model file")
     parser.add_argument("--episodes", type=int, default=10, help="Number of evaluation episodes")
     parser.add_argument("--render", action="store_true", help="Render episodes")
     parser.add_argument("--config", type=str, default="setup/track_config (1).yaml", help="Config file path")
