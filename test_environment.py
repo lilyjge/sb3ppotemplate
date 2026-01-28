@@ -28,62 +28,62 @@ def test_environment_basic():
     
     # TODO: Create environment instance
     # What render mode should you use for testing?
-    # env = SelfDrivingCarEnv(config_path="setup/track_config (1).yaml", render_mode=None)
+    # env = SelfDrivingCarEnv(config_path="setup/track_config (1).yaml", render_mode="human")
     
     try:
         # Test 1: Environment creation
         print("\n[Test 1] Creating environment...")
-        # env = SelfDrivingCarEnv(config_path="setup/track_config (1).yaml", render_mode=None)
-        # print("✓ Environment created successfully")
+        env = SelfDrivingCarEnv(config_path="setup/track_config (1).yaml", render_mode="human")
+        print("✓ Environment created successfully")
         
         # Test 2: Reset
         print("\n[Test 2] Testing reset()...")
-        # obs, info = env.reset()
-        # print(f"✓ Reset successful")
-        # print(f"  Observation shape: {obs.shape}")
-        # print(f"  Observation dtype: {obs.dtype}")
-        # print(f"  Observation range: [{obs.min():.3f}, {obs.max():.3f}]")
+        obs, info = env.reset()
+        print(f"✓ Reset successful")
+        print(f"  Observation shape: {obs.shape}")
+        print(f"  Observation dtype: {obs.dtype}")
+        print(f"  Observation range: [{obs.min():.3f}, {obs.max():.3f}]")
         
         # Test 3: Observation space
         print("\n[Test 3] Checking observation space...")
-        # print(f"  Observation space: {env.observation_space}")
-        # print(f"  Observation in space: {env.observation_space.contains(obs)}")
-        # if not env.observation_space.contains(obs):
-        #     print("  ✗ WARNING: Observation is not within observation space!")
+        print(f"  Observation space: {env.observation_space}")
+        print(f"  Observation in space: {env.observation_space.contains(obs)}")
+        if not env.observation_space.contains(obs):
+            print("  ✗ WARNING: Observation is not within observation space!")
         
         # Test 4: Action space
         print("\n[Test 4] Checking action space...")
-        # print(f"  Action space: {env.action_space}")
-        # sample_action = env.action_space.sample()
-        # print(f"  Sample action: {sample_action}")
+        print(f"  Action space: {env.action_space}")
+        sample_action = env.action_space.sample()
+        print(f"  Sample action: {sample_action}")
         
         # Test 5: Step
         print("\n[Test 5] Testing step()...")
-        # sample_action = env.action_space.sample()
-        # obs, reward, terminated, truncated, info = env.step(sample_action)
-        # print(f"✓ Step successful")
-        # print(f"  New observation shape: {obs.shape}")
-        # print(f"  Reward: {reward:.4f}")
-        # print(f"  Terminated: {terminated}")
-        # print(f"  Truncated: {truncated}")
+        sample_action = env.action_space.sample()
+        obs, reward, terminated, truncated, info = env.step(sample_action)
+        print(f"✓ Step successful")
+        print(f"  New observation shape: {obs.shape}")
+        print(f"  Reward: {reward:.4f}")
+        print(f"  Terminated: {terminated}")
+        print(f"  Truncated: {truncated}")
         
         # Test 6: Multiple steps
         print("\n[Test 6] Running multiple steps...")
-        # total_reward = 0
-        # for i in range(10):
-        #     action = env.action_space.sample()
-        #     obs, reward, terminated, truncated, info = env.step(action)
-        #     total_reward += reward
-        #     if terminated or truncated:
-        #         print(f"  Episode ended at step {i+1}")
-        #         break
-        # print(f"✓ Completed {min(10, i+1)} steps")
-        # print(f"  Total reward: {total_reward:.4f}")
+        total_reward = 0
+        for i in range(10):
+            action = env.action_space.sample()
+            obs, reward, terminated, truncated, info = env.step(action)
+            total_reward += reward
+            if terminated or truncated:
+                print(f"  Episode ended at step {i+1}")
+                break
+        print(f"✓ Completed {min(10, i+1)} steps")
+        print(f"  Total reward: {total_reward:.4f}")
         
         # Test 7: Close
         print("\n[Test 7] Testing close()...")
-        # env.close()
-        # print("✓ Environment closed successfully")
+        env.close()
+        print("✓ Environment closed successfully")
         
         print("\n" + "="*60)
         print("All basic tests passed! ✓")
