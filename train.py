@@ -115,7 +115,7 @@ def main():
     
     # TODO: Create training environment
     # What render mode should you use for training? Why?
-    train_env = create_env("setup/track_config (1).yaml", render_mode="human")
+    train_env = create_env("setup/track_config (1).yaml", render_mode=None)
     
     # TODO: Create evaluation environment
     # Should evaluation use a different render mode?

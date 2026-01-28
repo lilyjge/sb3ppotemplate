@@ -13,6 +13,7 @@ Questions to consider:
 
 import os
 import argparse
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 from stable_baselines3 import PPO
@@ -40,14 +41,14 @@ def create_env(config_path: str, render_mode: str = "human"):
     def _make_env():
         env = SelfDrivingCarEnv(config_path=config_path, render_mode=render_mode)
         # TODO: Wrap with Monitor for episode statistics
-        # env = Monitor(env, ???)
+        env = Monitor(env, "evaluation_results.csv")
         return env
     
     # TODO: Create vectorized environment
     # Do you need vectorization for evaluation?
-    # env = DummyVecEnv([_make_env])
+    env = DummyVecEnv([_make_env])
     
-    return None  # Placeholder
+    return env
 
 
 def load_model(model_path: str, env):
@@ -66,73 +67,69 @@ def load_model(model_path: str, env):
         model: Loaded PPO model
     """
     # TODO: Check if model exists
-    # if not os.path.exists(model_path):
-    #     raise FileNotFoundError(f"Model not found: {model_path}")
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model not found: {model_path}")
     
     # TODO: Load model
     # How do you load a PPO model?
-    # model = PPO.load(???, env=???)
+    model = PPO.load(model_path, env=env)
     
-    return None  # Placeholder
+    return model
 
 
 def evaluate_episode(model, env, render: bool = True):
     """
     Run a single evaluation episode.
     
-    Questions:
-    - Should actions be deterministic or stochastic?
-    - What information should you collect during an episode?
-    - How do you know when an episode ends?
-    
     Args:
         model: Trained PPO model
-        env: Environment
+        env: Vectorized environment (e.g. DummyVecEnv with n_envs=1)
         render: Whether to render the episode
         
     Returns:
         episode_info: Dictionary with episode statistics
     """
-    # TODO: Reset environment
-    # obs, info = env.reset()
+    # Reset environment (VecEnv API returns only observations)
+    obs = env.reset()  # shape: (n_envs, *obs_shape)
     
-    # TODO: Initialize tracking variables
-    # episode_reward = 0.0
-    # episode_length = 0
-    # done = False
-    # actions_taken = []
-    # rewards_received = []
+    episode_reward = 0.0
+    episode_length = 0
+    done = False
+    actions_taken = []
+    rewards_received = []
     
-    # TODO: Run episode
-    # while not done:
-    #     # Get action from model
-    #     # What's the difference between predict() and sample()?
-    #     # Should you use deterministic=True?
-    #     # action, _ = model.predict(obs, deterministic=???)
-    #     
-    #     # Step environment
-    #     # obs, reward, terminated, truncated, info = env.step(action)
-    #     # done = terminated or truncated
-    #     
-    #     # Update tracking
-    #     # episode_reward += reward
-    #     # episode_length += 1
-    #     # actions_taken.append(action)
-    #     # rewards_received.append(reward)
-    #     
-    #     # Render if requested
-    #     # if render:
-    #     #     env.render()
+    while not done:
+        action, _ = model.predict(obs, deterministic=True)
+        
+        # VecEnv step: obs, rewards, dones, infos
+        obs, rewards, dones, infos = env.step(action)
+        
+        # Single-env VecEnv (n_envs = 1)
+        reward = float(rewards[0])
+        done = bool(dones[0])
+        info = infos[0]
+        
+        # Update tracking
+        episode_reward += reward
+        episode_length += 1
+        actions_taken.append(action)
+        rewards_received.append(reward)
+        
+        # Render if requested (and slow down so motion is visible)
+        if render:
+            env.render()
+            # Small delay for human-viewable playback; adjust as needed
+            time.sleep(0.5)
     
-    # TODO: Compile episode statistics
-    # episode_info = {
-    #     "reward": episode_reward,
-    #     "length": episode_length,
-    #     "actions": np.array(actions_taken),
-    #     "rewards": np.array(rewards_received),
-    # }
+    episode_info = {
+        "reward": episode_reward,
+        "length": episode_length,
+        "actions": np.array(actions_taken),
+        "rewards": np.array(rewards_received),
+        "last_info": info,
+    }
     
-    return {}  # Placeholder
+    return episode_info
 
 
 def evaluate_multiple_episodes(model, env, n_episodes: int = 10, render: bool = False):
@@ -154,31 +151,31 @@ def evaluate_multiple_episodes(model, env, n_episodes: int = 10, render: bool = 
         results: Dictionary with evaluation statistics
     """
     # TODO: Run multiple episodes
-    # episode_rewards = []
-    # episode_lengths = []
+    episode_rewards = []
+    episode_lengths = []
     # 
-    # for episode in range(n_episodes):
-    #     print(f"Running episode {episode + 1}/{n_episodes}...")
-    #     should_render = render and (episode == 0 or episode == n_episodes - 1)
-    #     episode_info = evaluate_episode(model, env, render=should_render)
-    #     
-    #     episode_rewards.append(episode_info["reward"])
-    #     episode_lengths.append(episode_info["length"])
+    for episode in range(n_episodes):
+        print(f"Running episode {episode + 1}/{n_episodes}...")
+        should_render = render and (episode == 0 or episode == n_episodes - 1)
+        episode_info = evaluate_episode(model, env, render=should_render)
+        
+        episode_rewards.append(episode_info["reward"])
+        episode_lengths.append(episode_info["length"])
     
     # TODO: Compute statistics
     # What statistics are most informative?
-    # results = {
-    #     "mean_reward": np.mean(episode_rewards),
-    #     "std_reward": np.std(episode_rewards),
-    #     "min_reward": np.min(episode_rewards),
-    #     "max_reward": np.max(episode_rewards),
-    #     "mean_length": np.mean(episode_lengths),
-    #     "std_length": np.std(episode_lengths),
-    #     "episode_rewards": episode_rewards,
-    #     "episode_lengths": episode_lengths,
-    # }
+    results = {
+        "mean_reward": np.mean(episode_rewards),
+        "std_reward": np.std(episode_rewards),
+        "min_reward": np.min(episode_rewards),
+        "max_reward": np.max(episode_rewards),
+        "mean_length": np.mean(episode_lengths),
+        "std_length": np.std(episode_lengths),
+        "episode_rewards": episode_rewards,
+        "episode_lengths": episode_lengths,
+    }
     
-    return {}  # Placeholder
+    return results
 
 
 def visualize_results(results: dict, save_path: str = None):
@@ -198,33 +195,32 @@ def visualize_results(results: dict, save_path: str = None):
     # What plots would help understand agent performance?
     # 
     # Example: Reward distribution
-    # fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     # 
     # # Plot 1: Reward distribution
-    # axes[0].hist(results["episode_rewards"], bins=20, edgecolor="black")
-    # axes[0].axvline(results["mean_reward"], color="red", linestyle="--", label="Mean")
-    # axes[0].set_xlabel("Episode Reward")
-    # axes[0].set_ylabel("Frequency")
-    # axes[0].set_title("Reward Distribution")
-    # axes[0].legend()
+    axes[0].hist(results["episode_rewards"], bins=20, edgecolor="black")
+    axes[0].axvline(results["mean_reward"], color="red", linestyle="--", label="Mean")
+    axes[0].set_xlabel("Episode Reward")
+    axes[0].set_ylabel("Frequency")
+    axes[0].set_title("Reward Distribution")
+    axes[0].legend()
     # 
-    # # Plot 2: Episode lengths
-    # axes[1].plot(results["episode_lengths"], marker="o")
-    # axes[1].axhline(results["mean_length"], color="red", linestyle="--", label="Mean")
-    # axes[1].set_xlabel("Episode")
-    # axes[1].set_ylabel("Episode Length")
-    # axes[1].set_title("Episode Lengths")
-    # axes[1].legend()
-    # 
-    # plt.tight_layout()
-    # 
-    # if save_path:
-    #     plt.savefig(save_path)
-    #     print(f"Figure saved to {save_path}")
-    # else:
-    #     plt.show()
+    # Plot 2: Episode lengths
+    axes[1].plot(results["episode_lengths"], marker="o")
+    axes[1].axhline(results["mean_length"], color="red", linestyle="--", label="Mean")
+    axes[1].set_xlabel("Episode")
+    axes[1].set_ylabel("Episode Length")
+    axes[1].set_title("Episode Lengths")
+    axes[1].legend()
     
-    pass
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Figure saved to {save_path}")
+    else:
+        plt.show()
+    
 
 
 def print_results(results: dict):
@@ -239,16 +235,14 @@ def print_results(results: dict):
         results: Evaluation results dictionary
     """
     # TODO: Print formatted results
-    # print("\n" + "="*50)
-    # print("EVALUATION RESULTS")
-    # print("="*50)
-    # print(f"Mean Reward: {results['mean_reward']:.2f} ± {results['std_reward']:.2f}")
-    # print(f"Reward Range: [{results['min_reward']:.2f}, {results['max_reward']:.2f}]")
-    # print(f"Mean Episode Length: {results['mean_length']:.2f} ± {results['std_length']:.2f}")
-    # print("="*50 + "\n")
+    print("\n" + "="*50)
+    print("EVALUATION RESULTS")
+    print("="*50)
+    print(f"Mean Reward: {results['mean_reward']:.2f} ± {results['std_reward']:.2f}")
+    print(f"Reward Range: [{results['min_reward']:.2f}, {results['max_reward']:.2f}]")
+    print(f"Mean Episode Length: {results['mean_length']:.2f} ± {results['std_length']:.2f}")
+    print("="*50 + "\n")
     
-    pass
-
 
 def main():
     """
@@ -261,39 +255,39 @@ def main():
     """
     # TODO: Parse command line arguments
     # How should users specify model path, number of episodes, etc.?
-    # parser = argparse.ArgumentParser(description="Evaluate trained PPO model")
-    # parser.add_argument("--model", type=str, required=True, help="Path to model file")
-    # parser.add_argument("--episodes", type=int, default=10, help="Number of evaluation episodes")
-    # parser.add_argument("--render", action="store_true", help="Render episodes")
-    # parser.add_argument("--config", type=str, default="setup/track_config (1).yaml", help="Config file path")
-    # args = parser.parse_args()
+    parser = argparse.ArgumentParser(description="Evaluate trained PPO model")
+    parser.add_argument("--model", type=str, default="models/final_model.zip", help="Path to model file")
+    parser.add_argument("--episodes", type=int, default=10, help="Number of evaluation episodes")
+    parser.add_argument("--render", action="store_true", help="Render episodes")
+    parser.add_argument("--config", type=str, default="setup/track_config (1).yaml", help="Config file path")
+    args = parser.parse_args()
     
     # For now, use default values
-    model_path = "models/best_model.zip"  # TODO: Get from args
-    n_episodes = 10  # TODO: Get from args
-    render = True  # TODO: Get from args
-    config_path = "setup/track_config (1).yaml"  # TODO: Get from args
+    model_path = args.model
+    n_episodes = args.episodes
+    render = args.render
+    config_path = args.config
     
     # TODO: Create environment
     # What render mode should you use?
-    # env = create_env(config_path, render_mode="human" if render else None)
+    env = create_env(config_path, render_mode="human" if render else None)
     
     # TODO: Load model
-    # model = load_model(model_path, env)
+    model = load_model(model_path, env)
     
     # TODO: Run evaluation
-    # print(f"Evaluating model: {model_path}")
-    # print(f"Running {n_episodes} episodes...")
-    # results = evaluate_multiple_episodes(model, env, n_episodes=n_episodes, render=render)
+    print(f"Evaluating model: {model_path}")
+    print(f"Running {n_episodes} episodes...")
+    results = evaluate_multiple_episodes(model, env, n_episodes=n_episodes, render=render)
     
     # TODO: Display results
-    # print_results(results)
+    print_results(results)
     
     # TODO: Visualize results
-    # visualize_results(results, save_path="evaluation_results.png")
+    visualize_results(results, save_path="evaluation_results.png")
     
     # TODO: Clean up
-    # env.close()
+    env.close()
     
     print("Evaluation complete!")
 

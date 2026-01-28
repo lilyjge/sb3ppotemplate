@@ -234,24 +234,56 @@ class SelfDrivingCarEnv(gym.Env):
         last_centerline_idx = np.argmin(distances_to_centerline_last)
         
         # Calculate forward progress along centerline
-        # Handle wrapping around the track (closed loop)
-        # Check both forward and backward directions, choose the shorter path
+        # Define "forward" as increasing index (track direction), "backward" as decreasing index
+        # The centerline points are ordered, so forward = increasing index (with wrap)
         forward_steps = (current_centerline_idx - last_centerline_idx) % num_segments
         backward_steps = (last_centerline_idx - current_centerline_idx) % num_segments
         
-        # Determine direction: prefer forward if similar, but penalize clear backward movement
-        if forward_steps <= backward_steps:
-            # Moving forward (or minimal/no movement)
-            # Convert segment progress to approximate distance (each segment is roughly equal)
-            segment_progress = forward_steps
-            # Normalize by number of segments to get progress fraction
+        # Get track tangent direction at current position (forward direction along track)
+        next_idx = (current_centerline_idx + 1) % num_segments
+        track_forward_dir = centerline_2d[next_idx] - centerline_2d[current_centerline_idx]
+        track_forward_dir = track_forward_dir / (np.linalg.norm(track_forward_dir) + 1e-6)  # Normalize
+        
+        # Get car's velocity direction (2D) to determine actual movement direction
+        car_vel_2d = np.array(car_vel[:2])
+        car_speed_2d = np.linalg.norm(car_vel_2d)
+        velocity_alignment = 0.0
+        if car_speed_2d > 0.01:  # Only use velocity if car is actually moving
+            car_vel_dir = car_vel_2d / car_speed_2d
+            # Dot product: positive = moving forward along track, negative = moving backward
+            velocity_alignment = np.dot(car_vel_dir, track_forward_dir)
+        
+        # Determine direction using velocity as primary signal (more reliable than segment jumps)
+        # If velocity alignment is positive, we're moving forward; if negative, backward
+        # Use segment progress as secondary signal when velocity is ambiguous
+        if abs(velocity_alignment) > 0.1:  # Clear velocity signal
+            is_moving_forward = velocity_alignment > 0.0
+            # Use segment progress to determine magnitude, but direction from velocity
+            if is_moving_forward:
+                segment_progress = forward_steps
+            else:
+                segment_progress = backward_steps
+        else:  # Velocity ambiguous (slow or perpendicular), use segment progress
+            # Prefer forward direction (increasing index) unless clearly going backward
+            if forward_steps <= backward_steps:
+                is_moving_forward = True
+                segment_progress = forward_steps
+            else:
+                is_moving_forward = False
+                segment_progress = backward_steps
+        
+        # Calculate reward based on direction
+        if is_moving_forward:
+            # Moving forward - reward progress
             progress_reward = segment_progress / num_segments
-            # Also add small reward for staying close to centerline
+            # Boost reward if velocity is well-aligned with track direction
+            if velocity_alignment > 0.7:
+                progress_reward *= 1.5  # Bonus for excellent alignment
+            # Also add reward for staying close to centerline
             distance_to_centerline = distances_to_centerline[current_centerline_idx]
             centerline_alignment_bonus = max(0, 0.5 * (1.0 - distance_to_centerline / self.track.track_width))
         else:
             # Moving backward - penalize heavily
-            segment_progress = backward_steps
             progress_reward = -2.0 * segment_progress / num_segments  # Heavy penalty for going backward
             centerline_alignment_bonus = 0
         
