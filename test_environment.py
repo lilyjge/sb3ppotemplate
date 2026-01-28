@@ -110,29 +110,29 @@ def test_environment_episode():
     
     try:
         # TODO: Create environment and run a full episode
-        # env = SelfDrivingCarEnv(config_path="setup/track_config (1).yaml", render_mode=None)
-        # obs, info = env.reset()
-        # 
-        # episode_reward = 0
-        # episode_length = 0
-        # done = False
-        # 
-        # while not done:
-        #     action = env.action_space.sample()
-        #     obs, reward, terminated, truncated, info = env.step(action)
-        #     episode_reward += reward
-        #     episode_length += 1
-        #     done = terminated or truncated
-        #     
-        #     if episode_length > 1000:  # Safety limit
-        #         print("  WARNING: Episode exceeded 1000 steps")
-        #         break
-        # 
-        # print(f"✓ Episode completed")
-        # print(f"  Episode length: {episode_length}")
-        # print(f"  Episode reward: {episode_reward:.4f}")
-        # 
-        # env.close()
+        env = SelfDrivingCarEnv(config_path="setup/track_config (1).yaml", render_mode=None)
+        obs, info = env.reset()
+        
+        episode_reward = 0
+        episode_length = 0
+        done = False
+        
+        while not done:
+            action = env.action_space.sample()
+            obs, reward, terminated, truncated, info = env.step(action)
+            episode_reward += reward
+            episode_length += 1
+            done = terminated or truncated
+            
+            if episode_length > 1000:  # Safety limit
+                print("  WARNING: Episode exceeded 1000 steps")
+                break
+        
+        print(f"✓ Episode completed")
+        print(f"  Episode length: {episode_length}")
+        print(f"  Episode reward: {episode_reward:.4f}")
+        
+        env.close()
         
         print("Episode test passed! ✓")
         return True
@@ -159,21 +159,21 @@ def test_environment_visualization():
         # Note: This will open a GUI window if render_mode="human"
         # Uncomment to test visualization
         # 
-        # env = SelfDrivingCarEnv(config_path="setup/track_config (1).yaml", render_mode="human")
-        # obs, info = env.reset()
-        # 
-        # print("Running 100 steps with visualization...")
-        # print("(Close the PyBullet window when done)")
-        # 
-        # for i in range(100):
-        #     action = env.action_space.sample()
-        #     obs, reward, terminated, truncated, info = env.step(action)
-        #     env.render()
-        #     if terminated or truncated:
-        #         obs, info = env.reset()
-        # 
-        # env.close()
-        # print("✓ Visualization test completed")
+        env = SelfDrivingCarEnv(config_path="setup/track_config (1).yaml", render_mode="human")
+        obs, info = env.reset()
+        
+        print("Running 100 steps with visualization...")
+        print("(Close the PyBullet window when done)")
+        
+        for i in range(100):
+            action = env.action_space.sample()
+            obs, reward, terminated, truncated, info = env.step(action)
+            env.render()
+            if terminated or truncated:
+                obs, info = env.reset()
+        
+        env.close()
+        print("✓ Visualization test completed")
         
         print("(Skipping visualization test - uncomment code to test)")
         return True
