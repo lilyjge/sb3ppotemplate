@@ -41,14 +41,14 @@ def create_env(config_path: str, render_mode: str = None):
         env = SelfDrivingCarEnv(config_path=config_path, render_mode=render_mode)
         # TODO: Wrap environment with Monitor for logging
         # What does Monitor do? Why is it useful?
-        # env = Monitor(env, ???)
+        env = Monitor(env, "logs/")
         return env
     
     # TODO: Create vectorized environment
     # Why use DummyVecEnv? When would you use SubprocVecEnv?
-    # env = DummyVecEnv([_make_env])
+    env = DummyVecEnv([_make_env])
     
-    return None  # Placeholder
+    return env
 
 
 def load_config(config_path: str = "setup/track_config (1).yaml"):
@@ -72,21 +72,21 @@ def load_config(config_path: str = "setup/track_config (1).yaml"):
     config = {
         # TODO: Define PPO hyperparameters
         # What values should these have? How do you choose?
-        # "learning_rate": ???,  # How fast should the agent learn?
-        # "n_steps": ???,  # How many steps before updating?
-        # "batch_size": ???,  # How many samples per update?
-        # "n_epochs": ???,  # How many times to use the same data?
-        # "gamma": ???,  # Discount factor - how much do future rewards matter?
-        # "gae_lambda": ???,  # GAE parameter - what does this control?
-        # "clip_range": ???,  # PPO clipping - why is this important?
-        # "ent_coef": ???,  # Entropy coefficient - exploration vs exploitation
-        # "vf_coef": ???,  # Value function coefficient
-        # "max_grad_norm": ???,  # Gradient clipping - why use this?
+        "learning_rate": 0.0003,  # How fast should the agent learn?
+        "n_steps": 2048,  # How many steps before updating?
+        "batch_size": 64,  # How many samples per update?
+        "n_epochs": 10,  # How many times to use the same data?
+        "gamma": 0.99,  # Discount factor - how much do future rewards matter?
+        "gae_lambda": 0.95,  # GAE parameter - what does this control?
+        "clip_range": 0.2,  # PPO clipping - why is this important?
+        "ent_coef": 0.01,  # Entropy coefficient - exploration vs exploitation
+        "vf_coef": 0.5,  # Value function coefficient
+        "max_grad_norm": 0.5,  # Gradient clipping - why use this?
         
         # TODO: Define training settings
-        # "total_timesteps": ???,  # How long to train?
-        # "eval_freq": ???,  # How often to evaluate?
-        # "n_eval_episodes": ???,  # How many episodes for evaluation?
+        "total_timesteps": 1000000,  # How long to train?
+        "eval_freq": 10000,  # How often to evaluate?
+        "n_eval_episodes": 10,  # How many episodes for evaluation?
     }
     
     return config
@@ -105,86 +105,101 @@ def main():
     
     # TODO: Set up paths
     # Where should models be saved? Logs?
-    # models_dir = "models/"
-    # logs_dir = "logs/"
-    # os.makedirs(models_dir, exist_ok=True)
-    # os.makedirs(logs_dir, exist_ok=True)
+    models_dir = "models/"
+    logs_dir = "logs/"
+    os.makedirs(models_dir, exist_ok=True)
+    os.makedirs(logs_dir, exist_ok=True)
     
     # TODO: Load configuration
-    # config = load_config()
+    config = load_config()
     
     # TODO: Create training environment
     # What render mode should you use for training? Why?
-    # train_env = create_env(???, render_mode=???)
+    train_env = create_env("setup/track_config (1).yaml", render_mode="human")
     
     # TODO: Create evaluation environment
     # Should evaluation use a different render mode?
-    # eval_env = create_env(???, render_mode=???)
+    eval_env = create_env("setup/track_config (1).yaml", render_mode=None)
     
     # TODO: Initialize PPO agent
     # What parameters does PPO need?
     # Think about: policy type, environment, learning rate, etc.
-    # model = PPO(
-    #     policy="MlpPolicy",  # What other policies are available?
-    #     env=???,
-    #     learning_rate=???,
-    #     n_steps=???,
-    #     batch_size=???,
-    #     n_epochs=???,
-    #     gamma=???,
-    #     gae_lambda=???,
-    #     clip_range=???,
-    #     ent_coef=???,
-    #     vf_coef=???,
-    #     max_grad_norm=???,
-    #     verbose=1,  # What does verbose do?
-    #     tensorboard_log=logs_dir,  # How do you view tensorboard logs?
-    # )
+    model = PPO(
+        policy="MlpPolicy",  # What other policies are available?
+        env=train_env,
+        learning_rate=config["learning_rate"],
+        n_steps=config["n_steps"],
+        batch_size=config["batch_size"],
+        n_epochs=config["n_epochs"],
+        gamma=config["gamma"],
+        gae_lambda=config["gae_lambda"],
+        clip_range=config["clip_range"],
+        ent_coef=config["ent_coef"],
+        vf_coef=config["vf_coef"],
+        max_grad_norm=config["max_grad_norm"],
+        verbose=1,  # What does verbose do?
+        tensorboard_log=logs_dir,  # How do you view tensorboard logs?
+    )
     
     # TODO: Set up callbacks
     # What callbacks are useful?
     # - EvalCallback: Evaluate during training
     # - CheckpointCallback: Save model checkpoints
-    # callbacks = []
+    callbacks = []
+    eval_callback = EvalCallback(
+        eval_env,
+        best_model_save_path=models_dir,
+        log_path=logs_dir,
+        eval_freq=config["eval_freq"],
+        deterministic=True,  # Should evaluation be deterministic?
+        render=False,  # Should you render during evaluation?
+    )
+    callbacks.append(eval_callback)
+    checkpoint_callback = CheckpointCallback(
+        save_freq=config["total_timesteps"] // 10,
+        save_path=models_dir,
+        name_prefix="ppo_car",
+    )
+    callbacks.append(checkpoint_callback)
     
     # TODO: Create evaluation callback
     # How often should you evaluate? What metrics matter?
-    # eval_callback = EvalCallback(
-    #     eval_env,
-    #     best_model_save_path=???,
-    #     log_path=???,
-    #     eval_freq=???,
-    #     deterministic=True,  # Should evaluation be deterministic?
-    #     render=False,  # Should you render during evaluation?
-    # )
-    # callbacks.append(eval_callback)
+    eval_callback = EvalCallback(
+        eval_env,
+        best_model_save_path=models_dir,
+        log_path=logs_dir,
+        eval_freq=config["eval_freq"],
+        deterministic=True,  # Should evaluation be deterministic?
+        render=False,  # Should you render during evaluation?
+    )
+    callbacks.append(eval_callback)
     
     # TODO: Create checkpoint callback
     # How often should you save checkpoints?
-    # checkpoint_callback = CheckpointCallback(
-    #     save_freq=???,
-    #     save_path=???,
-    #     name_prefix="ppo_car",
-    # )
-    # callbacks.append(checkpoint_callback)
+    checkpoint_callback = CheckpointCallback(
+        save_freq=config["total_timesteps"] // 10,
+        save_path=models_dir,
+        name_prefix="ppo_car",
+    )
+    callbacks.append(checkpoint_callback)
     
     # TODO: Train the model
     # How do you start training?
     # What does learn() return?
-    # model.learn(
-    #     total_timesteps=???,
-    #     callback=callbacks,
-    #     progress_bar=True,  # Should you show progress bar?
-    # )
+    model.learn(
+        total_timesteps=config["total_timesteps"],
+        callback=callbacks,
+        progress_bar=True,  # Should you show progress bar?
+    )
     
     # TODO: Save final model
     # Where should the final model be saved?
-    # model.save(???)
+    model.save(os.path.join(models_dir, "final_model.zip"))
     
     # TODO: Clean up
     # What needs to be closed?
-    # train_env.close()
-    # eval_env.close()
+    train_env.close()
+    eval_env.close()
     
     print("Training complete! Check the models/ directory for saved models.")
 

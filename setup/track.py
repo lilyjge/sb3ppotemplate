@@ -70,6 +70,7 @@ class Track:
         self._rng = np.random.default_rng(self.seed)
 
         centerline = self._generate_centerline_points()
+        self.centerline = centerline  # Store centerline for spawning
         self.inner_points = self._offset_curve(centerline, -self.half_width)
         self.outer_points = self._offset_curve(centerline, self.half_width)
 

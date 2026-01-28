@@ -75,7 +75,8 @@ class SelfDrivingCarEnv(gym.Env):
         
         # TODO: Set up physics parameters from config
         # What physics settings affect the simulation? (gravity, time step, etc.)
-        p.setGravity(0, 0, -9.8, physicsClientId=self.physics_client)
+        gravity = self.config["physics"]["gravity"]
+        p.setGravity(0, 0, gravity, physicsClientId=self.physics_client)
         p.setTimeStep(self.config["physics"]["time_step"], physicsClientId=self.physics_client)
         
         # Initialize track
@@ -91,13 +92,18 @@ class SelfDrivingCarEnv(gym.Env):
         
         # TODO: Set initial car position and orientation from config
         # What's the difference between position and orientation?
-        spawn_pos = self.config["spawn"]["position"]
+        # Spawn on track centerline (first point)
+        spawn_pos = self.track.centerline[0].copy()
         spawn_orn = self.config["spawn"]["orientation"]
         p.resetBasePositionAndOrientation(self.car_id, spawn_pos, spawn_orn, physicsClientId=self.physics_client)
+        # Reset velocity to zero
+        p.resetBaseVelocity(self.car_id, [0, 0, 0], [0, 0, 0], physicsClientId=self.physics_client)
         
         # Initialize controller
         # TODO: Create the TankDriveController. What does it need?
         self.controller = TankDriveController(self.config_path, self.car_id, self.physics_client)
+        # Update fixed height to match centerline height
+        self.controller.fixed_height = self.track.centerline[0][2]
         
         # Define action space
         # TODO: What actions should the agent control?
@@ -116,9 +122,17 @@ class SelfDrivingCarEnv(gym.Env):
         
         # TODO: Initialize any tracking variables you need
         # What information do you need to compute rewards and check termination?
-        self.last_position = np.array(self.config["spawn"]["position"])
+        self.last_position = self.track.centerline[0].copy()
         self.progress = 0.0
         self.episode_reward = 0.0
+        # Track recent positions for stuck detection
+        self.position_history = [self.last_position.copy()]
+        self.stuck_threshold = 0.01  # Minimum movement per step to not be considered stuck
+        self.stuck_steps = 0
+        self.stuck_max_steps = 50  # Terminate if stuck for this many steps
+        # Track progress along centerline (which segment index we're closest to)
+        self.last_centerline_index = 0
+        self.total_lap_progress = 0.0  # Track cumulative progress around track
         
     def _get_observation(self) -> np.ndarray:
         """
@@ -192,25 +206,74 @@ class SelfDrivingCarEnv(gym.Env):
         # TODO: Check if car is on track
         # How can you determine if the car is within track boundaries?
         # Hint: Use self.track.inner_points and self.track.outer_points
-        is_on_track = np.all(car_pos > self.track.inner_points) and np.all(car_pos < self.track.outer_points)
+        # Use the same logic as termination check for consistency
+        car_pos_2d = np.array(car_pos[:2])
+        distances_to_inner = np.linalg.norm(self.track.inner_points[:, :2] - car_pos_2d, axis=1)
+        distances_to_outer = np.linalg.norm(self.track.outer_points[:, :2] - car_pos_2d, axis=1)
+        min_dist_to_inner = np.min(distances_to_inner)
+        min_dist_to_outer = np.min(distances_to_outer)
+        inner_margin = 0.05
+        outer_margin = 0.15
+        is_on_track = not ((min_dist_to_inner < inner_margin) or (min_dist_to_outer > self.track.track_width + outer_margin))
         
         # TODO: Calculate progress
         # How do you measure progress around the track?
         # Think about: Distance traveled, laps completed, distance from start, etc.
-        progress_reward = np.linalg.norm(np.array(car_pos) - np.array(self.last_position))
+        # Measure forward progress along the track centerline, not just Euclidean distance
+        car_pos_2d = np.array(car_pos[:2])
+        centerline_2d = self.track.centerline[:, :2]
+        num_segments = len(centerline_2d)
+        
+        # Find closest point on centerline to current position
+        distances_to_centerline = np.linalg.norm(centerline_2d - car_pos_2d, axis=1)
+        current_centerline_idx = np.argmin(distances_to_centerline)
+        
+        # Find closest point on centerline to last position
+        last_pos_2d = np.array(self.last_position[:2])
+        distances_to_centerline_last = np.linalg.norm(centerline_2d - last_pos_2d, axis=1)
+        last_centerline_idx = np.argmin(distances_to_centerline_last)
+        
+        # Calculate forward progress along centerline
+        # Handle wrapping around the track (closed loop)
+        # Check both forward and backward directions, choose the shorter path
+        forward_steps = (current_centerline_idx - last_centerline_idx) % num_segments
+        backward_steps = (last_centerline_idx - current_centerline_idx) % num_segments
+        
+        # Determine direction: prefer forward if similar, but penalize clear backward movement
+        if forward_steps <= backward_steps:
+            # Moving forward (or minimal/no movement)
+            # Convert segment progress to approximate distance (each segment is roughly equal)
+            segment_progress = forward_steps
+            # Normalize by number of segments to get progress fraction
+            progress_reward = segment_progress / num_segments
+            # Also add small reward for staying close to centerline
+            distance_to_centerline = distances_to_centerline[current_centerline_idx]
+            centerline_alignment_bonus = max(0, 0.5 * (1.0 - distance_to_centerline / self.track.track_width))
+        else:
+            # Moving backward - penalize heavily
+            segment_progress = backward_steps
+            progress_reward = -2.0 * segment_progress / num_segments  # Heavy penalty for going backward
+            centerline_alignment_bonus = 0
+        
+        # Update tracking
+        self.last_centerline_index = current_centerline_idx
+        self.total_lap_progress += progress_reward
         
         # TODO: Calculate speed reward
         # Should the agent be rewarded for speed? Why or why not?
-        speed_reward = np.linalg.norm(car_vel)
+        # Only reward forward speed (velocity in forward direction)
+        forward_speed = np.linalg.norm(car_vel[:2])  # 2D speed
+        speed_reward = forward_speed if progress_reward > 0 else 0  # Only reward if making forward progress
         
         # TODO: Calculate penalty for going off track
         # How severe should the penalty be? Should it end the episode?
-        off_track_penalty = -100 if not is_on_track else 0
+        off_track_penalty = -10.0 if not is_on_track else 0
         
         # TODO: Combine rewards
         # How do you weight different reward components?
         # What happens if rewards are too large or too small?
-        reward = 100 * progress_reward + 10 * speed_reward + off_track_penalty
+        # Reward forward progress heavily, add speed bonus, penalize off-track
+        reward = 50.0 * progress_reward + 5.0 * speed_reward + 2.0 * centerline_alignment_bonus + off_track_penalty
         
         return reward
     
@@ -229,9 +292,34 @@ class SelfDrivingCarEnv(gym.Env):
         # When should the episode end in failure?
         # Think about: Distance from track, car orientation, etc.
         car_pos, car_orn = p.getBasePositionAndOrientation(self.car_id, physicsClientId=self.physics_client)
-        is_off_track = np.all(car_pos < self.track.inner_points) or np.all(car_pos > self.track.outer_points)
+        car_pos_array = np.array(car_pos)
         
-        return is_off_track
+        # Check if car is off track
+        # Compute distances to inner and outer boundaries (using 2D projection, ignoring Z)
+        car_pos_2d = car_pos_array[:2]
+        distances_to_inner = np.linalg.norm(self.track.inner_points[:, :2] - car_pos_2d, axis=1)
+        distances_to_outer = np.linalg.norm(self.track.outer_points[:, :2] - car_pos_2d, axis=1)
+        min_dist_to_inner = np.min(distances_to_inner)
+        min_dist_to_outer = np.min(distances_to_outer)
+        
+        # Car is off-track if:
+        # 1. It's inside the inner boundary (distance to inner is very small, meaning it's past the inner boundary)
+        # 2. It's outside the outer boundary (distance to outer is larger than track width, meaning it's past the outer boundary)
+        # Use a margin to account for car size and track boundaries
+        inner_margin = 0.05  # Car is off-track if within 5cm of inner boundary (inside it)
+        outer_margin = 0.15  # Car is off-track if more than track_width + margin from outer boundary
+        is_off_track = (min_dist_to_inner < inner_margin) or (min_dist_to_outer > self.track.track_width + outer_margin)
+        
+        # Check if car is stuck (hasn't moved much recently)
+        if len(self.position_history) >= self.stuck_max_steps:
+            # Check total distance moved in last N steps
+            recent_positions = np.array(self.position_history[-self.stuck_max_steps:])
+            total_distance = np.sum(np.linalg.norm(np.diff(recent_positions[:, :2], axis=0), axis=1))
+            is_stuck = total_distance < self.stuck_threshold * self.stuck_max_steps
+        else:
+            is_stuck = False
+        
+        return is_off_track or is_stuck
     
     def _is_truncated(self) -> bool:
         """
@@ -271,20 +359,33 @@ class SelfDrivingCarEnv(gym.Env):
         # TODO: Reset step counter
         self.current_step = 0
         
+        # TODO: Optionally randomize track or starting position
+        # How can you add variety to training?
+        # Regenerate track first (if seed is provided), then position car on new track
+        if seed is not None:
+            np.random.seed(seed)
+            self.track = Track(self.config_path, seed)
+            self.track.spawn_in_pybullet(self.physics_client)
+            # Update fixed height to match new track centerline
+            self.controller.fixed_height = self.track.centerline[0][2]
+        
         # TODO: Reset car to initial position
         # Where should the car start? (from config)
-        p.resetBasePositionAndOrientation(self.car_id, self.config["spawn"]["position"], self.config["spawn"]["orientation"], physicsClientId=self.physics_client)
+        # Spawn on track centerline (first point)
+        spawn_pos = self.track.centerline[0].copy()
+        spawn_orn = self.config["spawn"]["orientation"]
+        p.resetBasePositionAndOrientation(self.car_id, spawn_pos, spawn_orn, physicsClientId=self.physics_client)
         p.resetBaseVelocity(self.car_id, [0, 0, 0], [0, 0, 0], physicsClientId=self.physics_client)
         
         # TODO: Reset tracking variables
-        self.last_position = self.config["spawn"]["position"]
+        self.last_position = spawn_pos.copy()
         self.progress = 0.0
-        
-        # TODO: Optionally randomize track or starting position
-        # How can you add variety to training?
-        np.random.seed(seed)
-        self.track = Track(self.config_path, seed)
-        self.track.spawn_in_pybullet(self.physics_client)
+        # Reset stuck detection
+        self.position_history = [spawn_pos.copy()]
+        self.stuck_steps = 0
+        # Reset centerline progress tracking
+        self.last_centerline_index = 0
+        self.total_lap_progress = 0.0
         observation = self._get_observation()
         info = {"track_seed": seed, "starting_position": self.config["spawn"]["position"]}
         return observation, info
@@ -319,14 +420,43 @@ class SelfDrivingCarEnv(gym.Env):
         # TODO: Convert action to car controls
         # The TankDriveController expects forward_input and turn_input (both -1 to +1)
         # How do you map your action space to these inputs?
-        forward_input = action[0]
-        turn_input = action[1]
+        forward_input = np.clip(action[0], -1.0, 1.0)
+        turn_input = np.clip(action[1], -1.0, 1.0)
         
         # TODO: Apply controls to car
         # The controller.update() method expects keyboard keys, but we're using actions
         # How can you adapt the controller or directly set velocities?
         # Hint: You might need to modify how you use the controller, or set velocities directly
-        p.resetBaseVelocity(self.car_id, [forward_input, 0, 0], [0, 0, turn_input], physicsClientId=self.physics_client)
+        # Scale to actual velocities
+        linear_velocity = forward_input * self.controller.max_linear_velocity
+        angular_velocity = turn_input * self.controller.max_angular_velocity
+        
+        # Get car orientation to compute forward direction
+        car_pos, car_orn = p.getBasePositionAndOrientation(self.car_id, physicsClientId=self.physics_client)
+        
+        # Lock Z position to fixed height
+        if abs(car_pos[2] - self.controller.fixed_height) > 0.001:
+            p.resetBasePositionAndOrientation(
+                self.car_id,
+                [car_pos[0], car_pos[1], self.controller.fixed_height],
+                car_orn,
+                physicsClientId=self.physics_client
+            )
+            car_pos, car_orn = p.getBasePositionAndOrientation(self.car_id, physicsClientId=self.physics_client)
+        
+        # Compute forward direction in world frame
+        rot_matrix = np.array(p.getMatrixFromQuaternion(car_orn)).reshape((3, 3))
+        car_forward = rot_matrix[:, 0]  # X-axis in car's local frame
+        
+        linear_velocity_world = linear_velocity * car_forward
+        
+        # Set velocity (Z component locked to 0)
+        p.resetBaseVelocity(
+            objectUniqueId=self.car_id,
+            linearVelocity=[linear_velocity_world[0], linear_velocity_world[1], 0.0],
+            angularVelocity=[0.0, 0.0, angular_velocity],
+            physicsClientId=self.physics_client
+        )
         
         # TODO: Step physics simulation
         # How many physics steps should run? (config has time_step)
@@ -336,8 +466,18 @@ class SelfDrivingCarEnv(gym.Env):
         # TODO: Get new observation
         observation = self._get_observation()
         
+        # Update position history for stuck detection
+        car_pos, _ = p.getBasePositionAndOrientation(self.car_id, physicsClientId=self.physics_client)
+        self.position_history.append(np.array(car_pos))
+        # Keep only recent history (last stuck_max_steps + some buffer)
+        if len(self.position_history) > self.stuck_max_steps + 10:
+            self.position_history.pop(0)
+        
         # TODO: Calculate reward
         reward = self._compute_reward(action)
+        
+        # Update last position for progress tracking
+        self.last_position = np.array(car_pos)
         
         # TODO: Check termination and truncation
         terminated = self._is_terminated()
